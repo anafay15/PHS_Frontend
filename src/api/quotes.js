@@ -1,5 +1,7 @@
 import api from './axios';
 
+export const QUOTE_STATUSES = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'];
+
 export const quotesApi = {
   getQuotes: async (params) => {
     const response = await api.get('/api/quotes', { params });

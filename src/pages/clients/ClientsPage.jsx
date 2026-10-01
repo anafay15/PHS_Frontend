@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { clientsApi } from '../../api/clients';
 import { useToast } from '../../context/ToastContext';
+import { getApiErrorMessage, unwrapList } from '../../utils/api';
 import EmptyState from '../../components/ui/EmptyState';
 import Modal from '../../components/ui/Modal';
 import ConfirmModal from '../../components/ui/ConfirmModal';
@@ -41,10 +42,9 @@ export default function ClientsPage() {
     try {
       setLoading(true);
       const data = await clientsApi.getClients();
-      setClients(Array.isArray(data) ? data : data?.clients || []);
+      setClients(unwrapList(data, 'clients'));
     } catch (err) {
-      console.error('Failed to load clients', err);
-      toast.error(err.response?.data?.message || 'Error querying clients registry.');
+      toast.error(getApiErrorMessage(err, 'Error querying clients registry.'));
     } finally {
       setLoading(false);
     }
@@ -56,21 +56,24 @@ export default function ClientsPage() {
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim()) {
-      toast.error('Client name is required.');
+    if (!formData.name.trim() || !formData.email.trim() || !formData.phone.trim()) {
+      toast.error('Name, email and phone are required.');
       return;
     }
 
     try {
       setCreateSubmitting(true);
-      await clientsApi.createClient(formData);
+      await clientsApi.createClient({
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+      });
       toast.success(`Client ${formData.name} added to directory.`);
       setIsCreateOpen(false);
       setFormData({ name: '', email: '', phone: '' });
       loadClients();
     } catch (err) {
-      console.error('Client creation failed', err);
-      toast.error(err.response?.data?.message || 'Failed to create client.');
+      toast.error(getApiErrorMessage(err, 'Failed to create client.'));
     } finally {
       setCreateSubmitting(false);
     }
@@ -86,7 +89,7 @@ export default function ClientsPage() {
       setClients((prev) => prev.filter((c) => c.id !== deleteTarget.id));
     } catch (err) {
       console.error('Failed to delete client', err);
-      toast.error(err.response?.data?.message || 'Failed to delete client.');
+      toast.error(getApiErrorMessage(err, 'Failed to delete client.'));
     } finally {
       setDeleteLoading(false);
     }
@@ -289,9 +292,10 @@ export default function ClientsPage() {
           </div>
 
           <div>
-            <label className="studio-label">Official Email</label>
+            <label className="studio-label">Official Email *</label>
             <input
               type="email"
+              required
               placeholder="elena@studio-editorial.com"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -300,9 +304,10 @@ export default function ClientsPage() {
           </div>
 
           <div>
-            <label className="studio-label">Contact Telephone</label>
+            <label className="studio-label">Contact Telephone *</label>
             <input
               type="tel"
+              required
               placeholder="+1 (555) 234-8900"
               value={formData.phone}
               onChange={(e) => setFormData({ ...formData, phone: e.target.value })}

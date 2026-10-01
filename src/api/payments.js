@@ -2,6 +2,7 @@ import api from './axios';
 
 export const PAYMENT_TYPES = ['DEPOSIT', 'FINAL', 'OTHER'];
 export const PAYMENT_STATUSES = ['PENDING', 'PAID', 'FAILED', 'REFUNDED'];
+export const PAYMENT_METHODS = ['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK', 'OTHER'];
 
 export const paymentsApi = {
   getPayments: async (params) => {

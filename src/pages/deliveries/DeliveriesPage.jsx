@@ -25,9 +25,9 @@ export default function DeliveriesPage() {
   const [createLoading, setCreateLoading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
-    url: '',
-    platform: 'Google Drive',
-    notes: '',
+    deliveryUrl: '',
+    description: '',
+    status: 'PENDING',
     projectId: '',
   });
 
@@ -36,9 +36,9 @@ export default function DeliveriesPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [editForm, setEditForm] = useState({
     title: '',
-    url: '',
-    platform: 'Google Drive',
-    notes: '',
+    deliveryUrl: '',
+    description: '',
+    status: 'PENDING',
     projectId: '',
   });
 
@@ -71,18 +71,18 @@ export default function DeliveriesPage() {
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.title || !formData.url) {
-      toast.error('Title and External URL are required.');
+    if (!formData.title.trim() || !formData.deliveryUrl.trim()) {
+      toast.error('Title and external delivery URL are required.');
       return;
     }
 
     try {
       setCreateLoading(true);
       const payload = {
-        title: formData.title,
-        url: formData.url,
-        platform: formData.platform,
-        notes: formData.notes,
+        title: formData.title.trim(),
+        deliveryUrl: formData.deliveryUrl.trim(),
+        description: formData.description || undefined,
+        status: formData.status,
       };
       if (formData.projectId) {
         payload.projectId = isNaN(formData.projectId) ? formData.projectId : Number(formData.projectId);
@@ -92,9 +92,9 @@ export default function DeliveriesPage() {
       setIsCreateOpen(false);
       setFormData({
         title: '',
-        url: '',
-        platform: 'Google Drive',
-        notes: '',
+        deliveryUrl: '',
+        description: '',
+        status: 'PENDING',
         projectId: '',
       });
       loadData();
@@ -110,9 +110,9 @@ export default function DeliveriesPage() {
     setEditTarget(delivery);
     setEditForm({
       title: delivery.title || '',
-      url: delivery.url || '',
-      platform: delivery.platform || 'Google Drive',
-      notes: delivery.notes || '',
+      deliveryUrl: delivery.deliveryUrl || '',
+      description: delivery.description || '',
+      status: delivery.status || 'PENDING',
       projectId: delivery.projectId || delivery.project?.id || '',
     });
   };
@@ -123,10 +123,10 @@ export default function DeliveriesPage() {
     try {
       setEditLoading(true);
       const payload = {
-        title: editForm.title,
-        url: editForm.url,
-        platform: editForm.platform,
-        notes: editForm.notes,
+        title: editForm.title.trim(),
+        deliveryUrl: editForm.deliveryUrl.trim(),
+        description: editForm.description || undefined,
+        status: editForm.status,
       };
       if (editForm.projectId) {
         payload.projectId = isNaN(editForm.projectId) ? editForm.projectId : Number(editForm.projectId);
@@ -229,7 +229,7 @@ export default function DeliveriesPage() {
                       marginBottom: '12px',
                     }}
                   >
-                    <span className="editorial-tag">{del.platform || 'SECURE LINK'}</span>
+                    <span className="editorial-tag">{del.status || 'PENDING'}</span>
                     <span className="font-mono" style={{ fontSize: '11px', color: '#71717a' }}>
                       #{del.id}
                     </span>
@@ -255,11 +255,11 @@ export default function DeliveriesPage() {
                         marginBottom: '8px',
                       }}
                     >
-                      PROJECT: {del.project.title}
+                      PROJECT: {del.project?.name || `Project #${del.projectId}`}
                     </div>
                   )}
 
-                  {del.notes && (
+                  {del.description && (
                     <p
                       style={{
                         fontSize: '13px',
@@ -268,7 +268,7 @@ export default function DeliveriesPage() {
                         marginBottom: '16px',
                       }}
                     >
-                      {del.notes}
+                      {del.description}
                     </p>
                   )}
                 </div>
@@ -284,7 +284,7 @@ export default function DeliveriesPage() {
                   }}
                 >
                   <a
-                    href={del.url}
+                    href={del.deliveryUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="studio-btn studio-btn-primary"
@@ -346,27 +346,23 @@ export default function DeliveriesPage() {
               type="url"
               required
               placeholder="https://pixieset.com/gallery/... or Frame.io"
-              value={formData.url}
-              onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+              value={formData.deliveryUrl}
+              onChange={(e) => setFormData({ ...formData, deliveryUrl: e.target.value })}
               className="studio-input"
             />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label className="studio-label">Host Platform</label>
+              <label className="studio-label">Status</label>
               <select
-                value={formData.platform}
-                onChange={(e) => setFormData({ ...formData, platform: e.target.value })}
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                 className="studio-select"
               >
-                <option value="Pixieset">Pixieset</option>
-                <option value="Frame.io">Frame.io</option>
-                <option value="Google Drive">Google Drive</option>
-                <option value="Dropbox">Dropbox</option>
-                <option value="Vimeo Review">Vimeo Review</option>
-                <option value="WeTransfer">WeTransfer</option>
-                <option value="Other Cloud">Other Cloud</option>
+                {DELIVERY_STATUSES.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -379,7 +375,7 @@ export default function DeliveriesPage() {
                 <option value="">-- No Project Linked --</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.title} (#{p.id})
+                    {p.name} (#{p.id})
                   </option>
                 ))}
               </select>
@@ -387,12 +383,12 @@ export default function DeliveriesPage() {
           </div>
 
           <div>
-            <label className="studio-label">Access Pin / Password / Client Notes</label>
+            <label className="studio-label">Description / Client Notes</label>
             <textarea
               rows={3}
               placeholder="Download PIN: 4892. Link expires in 60 days."
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               className="studio-textarea"
             />
           </div>
@@ -448,27 +444,23 @@ export default function DeliveriesPage() {
             <input
               type="url"
               required
-              value={editForm.url}
-              onChange={(e) => setEditForm({ ...editForm, url: e.target.value })}
+              value={editForm.deliveryUrl}
+              onChange={(e) => setEditForm({ ...editForm, deliveryUrl: e.target.value })}
               className="studio-input"
             />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label className="studio-label">Platform</label>
+              <label className="studio-label">Status</label>
               <select
-                value={editForm.platform}
-                onChange={(e) => setEditForm({ ...editForm, platform: e.target.value })}
+                value={editForm.status}
+                onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
                 className="studio-select"
               >
-                <option value="Pixieset">Pixieset</option>
-                <option value="Frame.io">Frame.io</option>
-                <option value="Google Drive">Google Drive</option>
-                <option value="Dropbox">Dropbox</option>
-                <option value="Vimeo Review">Vimeo Review</option>
-                <option value="WeTransfer">WeTransfer</option>
-                <option value="Other Cloud">Other Cloud</option>
+                {DELIVERY_STATUSES.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -481,7 +473,7 @@ export default function DeliveriesPage() {
                 <option value="">-- No Project Linked --</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.title} (#{p.id})
+                    {p.name} (#{p.id})
                   </option>
                 ))}
               </select>
@@ -492,8 +484,8 @@ export default function DeliveriesPage() {
             <label className="studio-label">Notes</label>
             <textarea
               rows={3}
-              value={editForm.notes}
-              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+              value={editForm.description}
+              onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
               className="studio-textarea"
             />
           </div>

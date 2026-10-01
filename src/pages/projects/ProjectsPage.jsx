@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { projectsApi, PROJECT_STATUSES } from '../../api/projects';
+import { projectsApi, PROJECT_STATUSES, getAllowedProjectStatuses } from '../../api/projects';
 import { clientsApi } from '../../api/clients';
 import { useToast } from '../../context/ToastContext';
 import StatusBadge from '../../components/ui/StatusBadge';
@@ -10,15 +10,27 @@ import ConfirmModal from '../../components/ui/ConfirmModal';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import ScrollReveal from '../../components/layout/ScrollReveal';
 import {
+  getApiErrorMessage,
+  unwrapList,
+  toIntId,
+  toDateInputValue,
+  projectName,
+} from '../../utils/api';
+import {
   FolderKanban,
   Plus,
   Search,
   Filter,
   Trash2,
   ExternalLink,
-  Edit2,
-  Calendar,
 } from 'lucide-react';
+
+const EMPTY_FORM = {
+  name: '',
+  description: '',
+  clientId: '',
+  shootDate: '',
+};
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
@@ -27,17 +39,10 @@ export default function ProjectsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
 
-  // Modal states
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    status: 'LEAD',
-    clientId: '',
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
 
-  // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -50,11 +55,10 @@ export default function ProjectsPage() {
         projectsApi.getProjects(),
         clientsApi.getClients().catch(() => []),
       ]);
-      setProjects(Array.isArray(projData) ? projData : projData?.projects || []);
-      setClients(Array.isArray(clientData) ? clientData : clientData?.clients || []);
+      setProjects(unwrapList(projData, 'projects'));
+      setClients(unwrapList(clientData, 'clients'));
     } catch (err) {
-      console.error('Failed to fetch projects', err);
-      toast.error(err.response?.data?.message || 'Error querying projects registry.');
+      toast.error(getApiErrorMessage(err, 'Error querying projects registry.'));
     } finally {
       setLoading(false);
     }
@@ -66,44 +70,45 @@ export default function ProjectsPage() {
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.title.trim()) {
-      toast.error('Project title is required.');
+    if (!formData.name.trim()) {
+      toast.error('Project name is required.');
+      return;
+    }
+    const clientId = toIntId(formData.clientId);
+    if (!clientId) {
+      toast.error('A client is required to create a project.');
       return;
     }
 
     try {
       setCreateSubmitting(true);
-      const payload = {
-        title: formData.title,
-        description: formData.description,
-        status: formData.status,
-      };
-      if (formData.clientId) {
-        payload.clientId = isNaN(formData.clientId) ? formData.clientId : Number(formData.clientId);
-      }
-      await projectsApi.createProject(payload);
+      await projectsApi.createProject({
+        name: formData.name.trim(),
+        description: formData.description || undefined,
+        shootDate: formData.shootDate || undefined,
+        clientId,
+      });
       toast.success('Project initialized successfully.');
       setIsCreateOpen(false);
-      setFormData({ title: '', description: '', status: 'LEAD', clientId: '' });
+      setFormData(EMPTY_FORM);
       loadData();
     } catch (err) {
-      console.error('Failed to create project', err);
-      toast.error(err.response?.data?.message || 'Failed to create project.');
+      toast.error(getApiErrorMessage(err, 'Failed to create project.'));
     } finally {
       setCreateSubmitting(false);
     }
   };
 
-  const handleStatusChange = async (projectId, newStatus) => {
+  const handleStatusChange = async (project, newStatus) => {
+    if (!newStatus || newStatus === project.status) return;
     try {
-      await projectsApi.updateProjectStatus(projectId, newStatus);
+      await projectsApi.updateProjectStatus(project.id, newStatus);
       toast.success(`Project status shifted to ${newStatus}`);
       setProjects((prev) =>
-        prev.map((p) => (p.id === projectId ? { ...p, status: newStatus } : p))
+        prev.map((p) => (p.id === project.id ? { ...p, status: newStatus } : p))
       );
     } catch (err) {
-      console.error('Failed to update status', err);
-      toast.error(err.response?.data?.message || 'Failed to update status.');
+      toast.error(getApiErrorMessage(err, 'Failed to update status.'));
     }
   };
 
@@ -116,24 +121,23 @@ export default function ProjectsPage() {
       setDeleteTarget(null);
       setProjects((prev) => prev.filter((p) => p.id !== deleteTarget.id));
     } catch (err) {
-      console.error('Failed to delete project', err);
-      toast.error(err.response?.data?.message || 'Failed to delete project.');
+      toast.error(getApiErrorMessage(err, 'Failed to delete project.'));
     } finally {
       setDeleteLoading(false);
     }
   };
 
   const filteredProjects = projects.filter((p) => {
-    const matchesSearch =
-      (p.title && p.title.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (p.description && p.description.toLowerCase().includes(searchTerm.toLowerCase()));
+    const name = (p.name || '').toLowerCase();
+    const description = (p.description || '').toLowerCase();
+    const q = searchTerm.toLowerCase();
+    const matchesSearch = name.includes(q) || description.includes(q);
     const matchesStatus = selectedStatus === 'ALL' || p.status === selectedStatus;
     return matchesSearch && matchesStatus;
   });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-      {/* Header */}
       <div
         style={{
           display: 'flex',
@@ -161,7 +165,6 @@ export default function ProjectsPage() {
         </button>
       </div>
 
-      {/* Filter and Search Bar */}
       <div
         style={{
           display: 'flex',
@@ -185,7 +188,7 @@ export default function ProjectsPage() {
             />
             <input
               type="text"
-              placeholder="Search projects by title..."
+              placeholder="Search projects by name..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="studio-input"
@@ -212,7 +215,6 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      {/* Projects Table / Empty State */}
       {loading ? (
         <LoadingSpinner text="ACCESSING PROJECTS DATABASE..." />
       ) : filteredProjects.length === 0 ? (
@@ -234,117 +236,124 @@ export default function ProjectsPage() {
               <thead>
                 <tr>
                   <th>Project ID</th>
-                  <th>Title & Scope</th>
+                  <th>Name & Scope</th>
                   <th>Client</th>
+                  <th>Shoot Date</th>
                   <th>Current State</th>
                   <th>Status Selector</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredProjects.map((p) => (
-                  <tr key={p.id}>
-                    <td className="font-mono" style={{ color: '#71717a', fontSize: '11px' }}>
-                      #{p.id}
-                    </td>
-                    <td>
-                      <Link
-                        to={`/projects/${p.id}`}
-                        style={{
-                          fontWeight: 600,
-                          color: '#ffffff',
-                          textDecoration: 'none',
-                          display: 'block',
-                          fontSize: '14px',
-                        }}
-                      >
-                        {p.title}
-                      </Link>
-                      {p.description && (
-                        <span
-                          style={{
-                            color: '#71717a',
-                            fontSize: '12px',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 1,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                          }}
-                        >
-                          {p.description}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ color: '#d4d4d8', fontSize: '13px' }}>
-                      {p.client ? (
-                        <Link
-                          to={`/clients/${p.client.id}`}
-                          style={{ color: '#d4d4d8', textDecoration: 'none' }}
-                        >
-                          {p.client.name}
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td>
-                      <StatusBadge status={p.status} />
-                    </td>
-                    <td>
-                      <select
-                        value={p.status}
-                        onChange={(e) => handleStatusChange(p.id, e.target.value)}
-                        className="studio-select"
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: '11px',
-                          fontFamily: 'var(--font-mono, monospace)',
-                          width: 'auto',
-                        }}
-                      >
-                        {PROJECT_STATUSES.map((status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                        }}
-                      >
+                {filteredProjects.map((p) => {
+                  const allowed = getAllowedProjectStatuses(p.status);
+                  return (
+                    <tr key={p.id}>
+                      <td className="font-mono" style={{ color: '#71717a', fontSize: '11px' }}>
+                        #{p.id}
+                      </td>
+                      <td>
                         <Link
                           to={`/projects/${p.id}`}
-                          className="studio-btn studio-btn-ghost"
-                          style={{ padding: '6px' }}
-                          title="Open Details"
+                          style={{
+                            fontWeight: 600,
+                            color: '#ffffff',
+                            textDecoration: 'none',
+                            display: 'block',
+                            fontSize: '14px',
+                          }}
                         >
-                          <ExternalLink size={14} />
+                          {projectName(p)}
                         </Link>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(p)}
-                          className="studio-btn studio-btn-ghost"
-                          style={{ padding: '6px', color: '#ef4444' }}
-                          title="Delete Project"
+                        {p.description && (
+                          <span
+                            style={{
+                              color: '#71717a',
+                              fontSize: '12px',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 1,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {p.description}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ color: '#d4d4d8', fontSize: '13px' }}>
+                        {p.client ? (
+                          <Link
+                            to={`/clients/${p.client.id}`}
+                            style={{ color: '#d4d4d8', textDecoration: 'none' }}
+                          >
+                            {p.client.name}
+                          </Link>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="font-mono" style={{ fontSize: '11px', color: '#71717a' }}>
+                        {p.shootDate ? new Date(p.shootDate).toLocaleDateString() : '—'}
+                      </td>
+                      <td>
+                        <StatusBadge status={p.status} />
+                      </td>
+                      <td>
+                        <select
+                          value={p.status}
+                          onChange={(e) => handleStatusChange(p, e.target.value)}
+                          disabled={allowed.length <= 1}
+                          className="studio-select"
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: '11px',
+                            fontFamily: 'var(--font-mono, monospace)',
+                            width: 'auto',
+                          }}
                         >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {allowed.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <Link
+                            to={`/projects/${p.id}`}
+                            className="studio-btn studio-btn-ghost"
+                            style={{ padding: '6px' }}
+                            title="Open Details"
+                          >
+                            <ExternalLink size={14} />
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(p)}
+                            className="studio-btn studio-btn-ghost"
+                            style={{ padding: '6px', color: '#ef4444' }}
+                            title="Delete Project"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </ScrollReveal>
       )}
 
-      {/* Creation Modal */}
       <Modal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
@@ -353,25 +362,26 @@ export default function ProjectsPage() {
       >
         <form onSubmit={handleCreateSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div>
-            <label className="studio-label">Project Title *</label>
+            <label className="studio-label">Project Name *</label>
             <input
               type="text"
               required
               placeholder="e.g. Editorial Autumn Campaign 2026"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               className="studio-input"
             />
           </div>
 
           <div>
-            <label className="studio-label">Assign Client</label>
+            <label className="studio-label">Assign Client *</label>
             <select
+              required
               value={formData.clientId}
               onChange={(e) => setFormData({ ...formData, clientId: e.target.value })}
               className="studio-select"
             >
-              <option value="">-- No Client Assigned (Unlinked) --</option>
+              <option value="">-- Select Client --</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name} ({c.email || 'No email'})
@@ -381,18 +391,13 @@ export default function ProjectsPage() {
           </div>
 
           <div>
-            <label className="studio-label">Initial Status</label>
-            <select
-              value={formData.status}
-              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-              className="studio-select"
-            >
-              {PROJECT_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
+            <label className="studio-label">Shoot Date</label>
+            <input
+              type="date"
+              value={formData.shootDate}
+              onChange={(e) => setFormData({ ...formData, shootDate: e.target.value })}
+              className="studio-input"
+            />
           </div>
 
           <div>
@@ -433,13 +438,12 @@ export default function ProjectsPage() {
         </form>
       </Modal>
 
-      {/* Delete Confirmation Modal */}
       <ConfirmModal
         isOpen={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
         title={`Delete Project #${deleteTarget?.id}`}
-        message={`Are you sure you want to permanently delete "${deleteTarget?.title}"? All linked references in the database may be affected.`}
+        message={`Are you sure you want to permanently delete "${projectName(deleteTarget, deleteTarget?.id)}"? All linked records may be affected.`}
         confirmText="Confirm Delete"
         loading={deleteLoading}
       />

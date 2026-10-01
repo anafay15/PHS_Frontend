@@ -1,7 +1,14 @@
 import { useState, useEffect } from 'react';
-import { bookingsApi } from '../../api/bookings';
+import { bookingsApi, BOOKING_STATUSES } from '../../api/bookings';
 import { projectsApi } from '../../api/projects';
 import { useToast } from '../../context/ToastContext';
+import {
+  getApiErrorMessage,
+  unwrapList,
+  toIntId,
+  toDateInputValue,
+  projectName,
+} from '../../utils/api';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import Modal from '../../components/ui/Modal';
@@ -32,7 +39,7 @@ export default function BookingsPage() {
     endTime: '',
     location: '',
     notes: '',
-    status: 'BOOKED',
+    status: 'SCHEDULED',
     projectId: '',
   });
 
@@ -45,7 +52,7 @@ export default function BookingsPage() {
     endTime: '',
     location: '',
     notes: '',
-    status: 'BOOKED',
+    status: 'SCHEDULED',
     projectId: '',
   });
 
@@ -62,11 +69,10 @@ export default function BookingsPage() {
         bookingsApi.getBookings(),
         projectsApi.getProjects().catch(() => []),
       ]);
-      setBookings(Array.isArray(bData) ? bData : bData?.bookings || []);
-      setProjects(Array.isArray(pData) ? pData : pData?.projects || []);
+      setBookings(unwrapList(bData, 'bookings'));
+      setProjects(unwrapList(pData, 'projects'));
     } catch (err) {
-      console.error('Failed to load bookings', err);
-      toast.error(err.response?.data?.message || 'Error querying bookings calendar.');
+      toast.error(getApiErrorMessage(err, 'Error querying bookings calendar.'));
     } finally {
       setLoading(false);
     }
@@ -78,15 +84,22 @@ export default function BookingsPage() {
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
+    const projectId = toIntId(formData.projectId);
+    if (!projectId || !formData.date || !formData.startTime || !formData.endTime) {
+      toast.error('Project, date, start time and end time are required.');
+      return;
+    }
+
     try {
       setCreateLoading(true);
-      const payload = { ...formData };
-      if (payload.projectId) {
-        payload.projectId = isNaN(payload.projectId) ? payload.projectId : Number(payload.projectId);
-      } else {
-        delete payload.projectId;
-      }
-      await bookingsApi.createBooking(payload);
+      await bookingsApi.createBooking({
+        projectId,
+        date: formData.date,
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        location: formData.location || undefined,
+        notes: formData.notes || undefined,
+      });
       toast.success('Production shoot booked on calendar.');
       setIsCreateOpen(false);
       setFormData({
@@ -95,13 +108,12 @@ export default function BookingsPage() {
         endTime: '',
         location: '',
         notes: '',
-        status: 'BOOKED',
+        status: 'SCHEDULED',
         projectId: '',
       });
       loadData();
     } catch (err) {
-      console.error('Failed to book shoot', err);
-      toast.error(err.response?.data?.message || 'Failed to record booking.');
+      toast.error(getApiErrorMessage(err, 'Failed to record booking.'));
     } finally {
       setCreateLoading(false);
     }
@@ -110,12 +122,12 @@ export default function BookingsPage() {
   const handleEditOpen = (booking) => {
     setEditTarget(booking);
     setEditForm({
-      date: booking.date ? booking.date.split('T')[0] : '',
+      date: toDateInputValue(booking.date),
       startTime: booking.startTime || '',
       endTime: booking.endTime || '',
       location: booking.location || '',
       notes: booking.notes || '',
-      status: booking.status || 'BOOKED',
+      status: booking.status || 'SCHEDULED',
       projectId: booking.projectId || booking.project?.id || '',
     });
   };
@@ -125,19 +137,19 @@ export default function BookingsPage() {
     if (!editTarget) return;
     try {
       setEditLoading(true);
-      const payload = { ...editForm };
-      if (payload.projectId) {
-        payload.projectId = isNaN(payload.projectId) ? payload.projectId : Number(payload.projectId);
-      } else {
-        delete payload.projectId;
-      }
-      await bookingsApi.updateBooking(editTarget.id, payload);
+      await bookingsApi.updateBooking(editTarget.id, {
+        date: editForm.date,
+        startTime: editForm.startTime,
+        endTime: editForm.endTime,
+        location: editForm.location,
+        notes: editForm.notes,
+        status: editForm.status,
+      });
       toast.success('Booking schedule revised.');
       setEditTarget(null);
       loadData();
     } catch (err) {
-      console.error('Failed to update booking', err);
-      toast.error(err.response?.data?.message || 'Failed to update booking.');
+      toast.error(getApiErrorMessage(err, 'Failed to update booking.'));
     } finally {
       setEditLoading(false);
     }
@@ -153,7 +165,7 @@ export default function BookingsPage() {
       setBookings((prev) => prev.filter((b) => b.id !== deleteTarget.id));
     } catch (err) {
       console.error('Failed to delete booking', err);
-      toast.error(err.response?.data?.message || 'Failed to delete booking.');
+      toast.error(getApiErrorMessage(err, 'Failed to delete booking.'));
     } finally {
       setDeleteLoading(false);
     }
@@ -251,13 +263,13 @@ export default function BookingsPage() {
                       )}
                     </td>
                     <td style={{ color: '#d4d4d8', fontSize: '13px' }}>
-                      {b.project?.title || (b.projectId ? `Project #${b.projectId}` : '—')}
+                      {projectName(b.project, b.projectId ? `Project #${b.projectId}` : '—')}
                     </td>
                     <td style={{ color: '#71717a', fontSize: '12px', maxWidth: '200px' }}>
                       {b.notes || '—'}
                     </td>
                     <td>
-                      <StatusBadge status={b.status || 'BOOKED'} />
+                      <StatusBadge status={b.status || 'SCHEDULED'} />
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div
@@ -316,19 +328,21 @@ export default function BookingsPage() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label className="studio-label">Start Time</label>
-              <input
-                type="time"
-                value={formData.startTime}
+            <label className="studio-label">Start Time *</label>
+            <input
+              type="time"
+              required
+              value={formData.startTime}
                 onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
                 className="studio-input"
               />
             </div>
             <div>
-              <label className="studio-label">End Time</label>
-              <input
-                type="time"
-                value={formData.endTime}
+            <label className="studio-label">End Time *</label>
+            <input
+              type="time"
+              required
+              value={formData.endTime}
                 onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
                 className="studio-input"
               />
@@ -347,16 +361,17 @@ export default function BookingsPage() {
           </div>
 
           <div>
-            <label className="studio-label">Associated Project</label>
+            <label className="studio-label">Associated Project *</label>
             <select
+              required
               value={formData.projectId}
               onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
               className="studio-select"
             >
-              <option value="">-- No Project Linked --</option>
+              <option value="">-- Select Project --</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.title} (#{p.id})
+                  {projectName(p)} (#{p.id})
                 </option>
               ))}
             </select>
@@ -421,19 +436,21 @@ export default function BookingsPage() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label className="studio-label">Start Time</label>
-              <input
-                type="time"
-                value={editForm.startTime}
+            <label className="studio-label">Start Time *</label>
+            <input
+              type="time"
+              required
+              value={editForm.startTime}
                 onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value })}
                 className="studio-input"
               />
             </div>
             <div>
-              <label className="studio-label">End Time</label>
-              <input
-                type="time"
-                value={editForm.endTime}
+            <label className="studio-label">End Time *</label>
+            <input
+              type="time"
+              required
+              value={editForm.endTime}
                 onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value })}
                 className="studio-input"
               />
@@ -457,27 +474,24 @@ export default function BookingsPage() {
               onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
               className="studio-select"
             >
-              <option value="BOOKED">BOOKED</option>
-              <option value="SHOOTING">SHOOTING</option>
-              <option value="COMPLETED">COMPLETED</option>
-              <option value="CANCELLED">CANCELLED</option>
+              {BOOKING_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
             </select>
           </div>
 
           <div>
-            <label className="studio-label">Linked Project</label>
-            <select
-              value={editForm.projectId}
-              onChange={(e) => setEditForm({ ...editForm, projectId: e.target.value })}
-              className="studio-select"
-            >
-              <option value="">-- No Project Linked --</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title} (#{p.id})
-                </option>
-              ))}
-            </select>
+            <div>
+              <label className="studio-label">Linked Project</label>
+              <div className="studio-input" style={{ color: '#a1a1aa' }}>
+                {projectName(
+                  projects.find((p) => Number(p.id) === Number(editForm.projectId)),
+                  editForm.projectId ? `Project #${editForm.projectId}` : '—'
+                )}
+              </div>
+            </div>
           </div>
 
           <div>

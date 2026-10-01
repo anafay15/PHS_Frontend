@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
-import { paymentsApi, PAYMENT_TYPES, PAYMENT_STATUSES } from '../../api/payments';
+import { paymentsApi, PAYMENT_TYPES, PAYMENT_STATUSES, PAYMENT_METHODS } from '../../api/payments';
 import { projectsApi } from '../../api/projects';
 import { useToast } from '../../context/ToastContext';
+import {
+  getApiErrorMessage,
+  unwrapList,
+  toIntId,
+  toDateInputValue,
+  formatCurrency,
+  projectName,
+} from '../../utils/api';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import Modal from '../../components/ui/Modal';
@@ -27,8 +35,8 @@ export default function PaymentsPage() {
     amount: '',
     type: 'DEPOSIT',
     status: 'PENDING',
+    method: '',
     projectId: '',
-    dueDate: '',
     paidAt: '',
     notes: '',
   });
@@ -40,8 +48,8 @@ export default function PaymentsPage() {
     amount: '',
     type: 'DEPOSIT',
     status: 'PENDING',
+    method: '',
     projectId: '',
-    dueDate: '',
     paidAt: '',
     notes: '',
   });
@@ -59,11 +67,10 @@ export default function PaymentsPage() {
         paymentsApi.getPayments(),
         projectsApi.getProjects().catch(() => []),
       ]);
-      setPayments(Array.isArray(payData) ? payData : payData?.payments || []);
-      setProjects(Array.isArray(pData) ? pData : pData?.projects || []);
+      setPayments(unwrapList(payData, 'payments'));
+      setProjects(unwrapList(pData, 'projects'));
     } catch (err) {
-      console.error('Failed to load payments', err);
-      toast.error(err.response?.data?.message || 'Error querying payments ledger.');
+      toast.error(getApiErrorMessage(err, 'Error querying payments ledger.'));
     } finally {
       setLoading(false);
     }
@@ -75,40 +82,42 @@ export default function PaymentsPage() {
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.amount) {
-      toast.error('Payment amount is required.');
+    const projectId = toIntId(formData.projectId);
+    if (!formData.amount || !projectId) {
+      toast.error('Amount, type and project are required.');
       return;
     }
 
     try {
       setCreateLoading(true);
-      const payload = {
+      const created = await paymentsApi.createPayment({
+        projectId,
         amount: Number(formData.amount),
         type: formData.type,
-        status: formData.status,
-        notes: formData.notes,
-      };
-      if (formData.dueDate) payload.dueDate = formData.dueDate;
-      if (formData.paidAt) payload.paidAt = formData.paidAt;
-      if (formData.projectId) {
-        payload.projectId = isNaN(formData.projectId) ? formData.projectId : Number(formData.projectId);
+        method: formData.method || undefined,
+        notes: formData.notes || undefined,
+      });
+      if (created?.id && (formData.status !== 'PENDING' || formData.paidAt)) {
+        await paymentsApi.updatePayment(created.id, {
+          status: formData.status,
+          paidAt: formData.paidAt || (formData.status === 'PAID' ? new Date().toISOString() : undefined),
+          method: formData.method || undefined,
+        });
       }
-      await paymentsApi.createPayment(payload);
       toast.success('Payment entry logged in financial ledger.');
       setIsCreateOpen(false);
       setFormData({
         amount: '',
         type: 'DEPOSIT',
         status: 'PENDING',
+        method: '',
         projectId: '',
-        dueDate: '',
         paidAt: '',
         notes: '',
       });
       loadData();
     } catch (err) {
-      console.error('Failed to log payment', err);
-      toast.error(err.response?.data?.message || 'Failed to record payment.');
+      toast.error(getApiErrorMessage(err, 'Failed to record payment.'));
     } finally {
       setCreateLoading(false);
     }
@@ -120,9 +129,9 @@ export default function PaymentsPage() {
       amount: pay.amount ?? '',
       type: pay.type || 'DEPOSIT',
       status: pay.status || 'PENDING',
+      method: pay.method || '',
       projectId: pay.projectId || pay.project?.id || '',
-      dueDate: pay.dueDate ? pay.dueDate.split('T')[0] : '',
-      paidAt: pay.paidAt ? pay.paidAt.split('T')[0] : '',
+      paidAt: toDateInputValue(pay.paidAt),
       notes: pay.notes || '',
     });
   };
@@ -132,24 +141,19 @@ export default function PaymentsPage() {
     if (!editTarget) return;
     try {
       setEditLoading(true);
-      const payload = {
+      await paymentsApi.updatePayment(editTarget.id, {
         amount: Number(editForm.amount),
         type: editForm.type,
         status: editForm.status,
+        method: editForm.method || null,
         notes: editForm.notes,
-      };
-      if (editForm.dueDate) payload.dueDate = editForm.dueDate;
-      if (editForm.paidAt) payload.paidAt = editForm.paidAt;
-      if (editForm.projectId) {
-        payload.projectId = isNaN(editForm.projectId) ? editForm.projectId : Number(editForm.projectId);
-      }
-      await paymentsApi.updatePayment(editTarget.id, payload);
+        paidAt: editForm.paidAt || (editForm.status === 'PAID' ? new Date().toISOString() : null),
+      });
       toast.success('Payment transaction record modified.');
       setEditTarget(null);
       loadData();
     } catch (err) {
-      console.error('Failed to update payment', err);
-      toast.error(err.response?.data?.message || 'Failed to update payment.');
+      toast.error(getApiErrorMessage(err, 'Failed to update payment.'));
     } finally {
       setEditLoading(false);
     }
@@ -165,17 +169,10 @@ export default function PaymentsPage() {
       setPayments((prev) => prev.filter((p) => p.id !== deleteTarget.id));
     } catch (err) {
       console.error('Failed to delete payment', err);
-      toast.error(err.response?.data?.message || 'Failed to delete payment.');
+      toast.error(getApiErrorMessage(err, 'Failed to delete payment.'));
     } finally {
       setDeleteLoading(false);
     }
-  };
-
-  const formatCurrency = (val) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(Number(val || 0));
   };
 
   return (
@@ -230,7 +227,7 @@ export default function PaymentsPage() {
                   <th>Type</th>
                   <th>Status</th>
                   <th>Linked Project</th>
-                  <th>Due Date</th>
+                  <th>Method</th>
                   <th>Paid Date</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
@@ -251,10 +248,10 @@ export default function PaymentsPage() {
                       <StatusBadge status={p.status || 'PENDING'} />
                     </td>
                     <td style={{ color: '#a1a1aa', fontSize: '13px' }}>
-                      {p.project?.title || (p.projectId ? `Project #${p.projectId}` : '—')}
+                      {projectName(p.project, p.projectId ? `Project #${p.projectId}` : '—')}
                     </td>
                     <td className="font-mono" style={{ fontSize: '11px', color: '#71717a' }}>
-                      {p.dueDate ? new Date(p.dueDate).toLocaleDateString() : '—'}
+                      {p.method || '—'}
                     </td>
                     <td className="font-mono" style={{ fontSize: '11px', color: '#71717a' }}>
                       {p.paidAt ? new Date(p.paidAt).toLocaleDateString() : '—'}
@@ -348,15 +345,7 @@ export default function PaymentsPage() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label className="studio-label">Due Date</label>
-              <input
-                type="date"
-                value={formData.dueDate}
-                onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                className="studio-input"
-              />
-            </div>
+            
             <div>
               <label className="studio-label">Paid At Date</label>
               <input
@@ -378,7 +367,7 @@ export default function PaymentsPage() {
               <option value="">-- No Project Linked --</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.title} (#{p.id})
+                  {p.name} (#{p.id})
                 </option>
               ))}
             </select>
@@ -474,15 +463,7 @@ export default function PaymentsPage() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label className="studio-label">Due Date</label>
-              <input
-                type="date"
-                value={editForm.dueDate}
-                onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value })}
-                className="studio-input"
-              />
-            </div>
+            
             <div>
               <label className="studio-label">Paid At Date</label>
               <input
@@ -504,7 +485,7 @@ export default function PaymentsPage() {
               <option value="">-- No Project Linked --</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.title} (#{p.id})
+                  {p.name} (#{p.id})
                 </option>
               ))}
             </select>

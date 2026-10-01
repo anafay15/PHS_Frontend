@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { clientsApi } from '../../api/clients';
+import { projectsApi } from '../../api/projects';
 import { useToast } from '../../context/ToastContext';
+import { getApiErrorMessage, unwrapList, unwrapRecord, projectName } from '../../utils/api';
 import Modal from '../../components/ui/Modal';
 import ConfirmModal from '../../components/ui/ConfirmModal';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -22,6 +24,7 @@ export default function ClientDetailPage() {
   const toast = useToast();
 
   const [client, setClient] = useState(null);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Edit Modal
@@ -40,17 +43,21 @@ export default function ClientDetailPage() {
   const fetchClient = async () => {
     try {
       setLoading(true);
-      const data = await clientsApi.getClient(id);
-      const c = data?.client || data;
+      const [data, projectData] = await Promise.all([
+        clientsApi.getClient(id),
+        projectsApi.getProjects().catch(() => []),
+      ]);
+      const c = unwrapRecord(data, 'client');
       setClient(c);
+      const allProjects = unwrapList(projectData, 'projects');
+      setProjects(allProjects.filter((p) => Number(p.clientId) === Number(id) || Number(p.client?.id) === Number(id)));
       setEditForm({
         name: c.name || '',
         email: c.email || '',
         phone: c.phone || '',
       });
     } catch (err) {
-      console.error('Failed to load client details', err);
-      toast.error(err.response?.data?.message || 'Could not retrieve client details.');
+      toast.error(getApiErrorMessage(err, 'Could not retrieve client details.'));
       navigate('/clients');
     } finally {
       setLoading(false);
@@ -65,13 +72,16 @@ export default function ClientDetailPage() {
     e.preventDefault();
     try {
       setEditLoading(true);
-      const updated = await clientsApi.updateClient(id, editForm);
+      const updated = await clientsApi.updateClient(id, {
+        name: editForm.name.trim(),
+        email: editForm.email.trim(),
+        phone: editForm.phone.trim(),
+      });
       toast.success('Client profile updated.');
-      setClient(updated?.client || updated || { ...client, ...editForm });
+      setClient(unwrapRecord(updated, 'client') || { ...client, ...editForm });
       setIsEditOpen(false);
     } catch (err) {
-      console.error('Failed to update client', err);
-      toast.error(err.response?.data?.message || 'Failed to update client profile.');
+      toast.error(getApiErrorMessage(err, 'Failed to update client profile.'));
     } finally {
       setEditLoading(false);
     }
@@ -85,7 +95,7 @@ export default function ClientDetailPage() {
       navigate('/clients');
     } catch (err) {
       console.error('Failed to delete client', err);
-      toast.error(err.response?.data?.message || 'Failed to delete client.');
+      toast.error(getApiErrorMessage(err, 'Failed to delete client.'));
     } finally {
       setDeleteLoading(false);
     }
@@ -96,8 +106,6 @@ export default function ClientDetailPage() {
   }
 
   if (!client) return null;
-
-  const projects = client.projects || [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
@@ -213,7 +221,7 @@ export default function ClientDetailPage() {
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Title</th>
+                  <th>Name</th>
                   <th>Status</th>
                   <th style={{ textAlign: 'right' }}>Action</th>
                 </tr>
@@ -224,7 +232,7 @@ export default function ClientDetailPage() {
                     <td className="font-mono" style={{ color: '#71717a' }}>
                       #{p.id}
                     </td>
-                    <td style={{ fontWeight: 500, color: '#ffffff' }}>{p.title}</td>
+                    <td style={{ fontWeight: 500, color: '#ffffff' }}>{projectName(p)}</td>
                     <td>
                       <StatusBadge status={p.status} />
                     </td>
@@ -268,6 +276,7 @@ export default function ClientDetailPage() {
             <label className="studio-label">Email</label>
             <input
               type="email"
+              required
               value={editForm.email}
               onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
               className="studio-input"
@@ -278,6 +287,7 @@ export default function ClientDetailPage() {
             <label className="studio-label">Phone</label>
             <input
               type="tel"
+              required
               value={editForm.phone}
               onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
               className="studio-input"

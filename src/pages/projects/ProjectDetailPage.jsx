@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { projectsApi, PROJECT_STATUSES } from '../../api/projects';
-import { clientsApi } from '../../api/clients';
+import { projectsApi, getAllowedProjectStatuses } from '../../api/projects';
 import { useToast } from '../../context/ToastContext';
 import StatusBadge from '../../components/ui/StatusBadge';
 import Modal from '../../components/ui/Modal';
 import ConfirmModal from '../../components/ui/ConfirmModal';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import {
+  getApiErrorMessage,
+  unwrapRecord,
+  toDateInputValue,
+  projectName,
+} from '../../utils/api';
+import {
   ArrowLeft,
   Edit3,
   Trash2,
-  Calendar,
-  CreditCard,
-  Send,
-  FileText,
   User,
   ExternalLink,
 } from 'lucide-react';
@@ -25,20 +26,16 @@ export default function ProjectDetailPage() {
   const toast = useToast();
 
   const [project, setProject] = useState(null);
-  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Edit Modal State
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
   const [editForm, setEditForm] = useState({
-    title: '',
+    name: '',
     description: '',
-    status: '',
-    clientId: '',
+    shootDate: '',
   });
 
-  // Delete State
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -46,17 +43,15 @@ export default function ProjectDetailPage() {
     try {
       setLoading(true);
       const data = await projectsApi.getProject(id);
-      const proj = data?.project || data;
+      const proj = unwrapRecord(data, 'project');
       setProject(proj);
       setEditForm({
-        title: proj.title || '',
+        name: proj.name || '',
         description: proj.description || '',
-        status: proj.status || 'LEAD',
-        clientId: proj.clientId || proj.client?.id || '',
+        shootDate: toDateInputValue(proj.shootDate),
       });
     } catch (err) {
-      console.error('Failed to load project details', err);
-      toast.error(err.response?.data?.message || 'Could not retrieve project.');
+      toast.error(getApiErrorMessage(err, 'Could not retrieve project.'));
       navigate('/projects');
     } finally {
       setLoading(false);
@@ -65,19 +60,16 @@ export default function ProjectDetailPage() {
 
   useEffect(() => {
     fetchProject();
-    clientsApi.getClients().then((res) => {
-      setClients(Array.isArray(res) ? res : res?.clients || []);
-    }).catch(() => {});
   }, [id]);
 
   const handleStatusChange = async (newStatus) => {
+    if (!newStatus || newStatus === project.status) return;
     try {
-      await projectsApi.updateProjectStatus(id, newStatus);
+      const updated = await projectsApi.updateProjectStatus(id, newStatus);
       toast.success(`Status updated to ${newStatus}`);
-      setProject((prev) => ({ ...prev, status: newStatus }));
+      setProject((prev) => ({ ...prev, ...updated, status: newStatus }));
     } catch (err) {
-      console.error('Status update failed', err);
-      toast.error(err.response?.data?.message || 'Failed to update status.');
+      toast.error(getApiErrorMessage(err, 'Failed to update status.'));
     }
   };
 
@@ -86,20 +78,17 @@ export default function ProjectDetailPage() {
     try {
       setEditLoading(true);
       const payload = {
-        title: editForm.title,
+        name: editForm.name.trim(),
         description: editForm.description,
-        status: editForm.status,
+        shootDate: editForm.shootDate || null,
+        status: project.status,
       };
-      if (editForm.clientId) {
-        payload.clientId = isNaN(editForm.clientId) ? editForm.clientId : Number(editForm.clientId);
-      }
       const updated = await projectsApi.updateProject(id, payload);
       toast.success('Project details revised successfully.');
-      setProject(updated?.project || updated || { ...project, ...payload });
+      setProject(unwrapRecord(updated, 'project') || { ...project, ...payload });
       setIsEditOpen(false);
     } catch (err) {
-      console.error('Edit project failed', err);
-      toast.error(err.response?.data?.message || 'Failed to revise project.');
+      toast.error(getApiErrorMessage(err, 'Failed to revise project.'));
     } finally {
       setEditLoading(false);
     }
@@ -112,8 +101,7 @@ export default function ProjectDetailPage() {
       toast.success('Project deleted from registry.');
       navigate('/projects');
     } catch (err) {
-      console.error('Delete failed', err);
-      toast.error(err.response?.data?.message || 'Failed to delete project.');
+      toast.error(getApiErrorMessage(err, 'Failed to delete project.'));
     } finally {
       setDeleteLoading(false);
     }
@@ -125,9 +113,10 @@ export default function ProjectDetailPage() {
 
   if (!project) return null;
 
+  const allowedStatuses = getAllowedProjectStatuses(project.status);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      {/* Top Navigation */}
       <div>
         <Link
           to="/projects"
@@ -147,7 +136,6 @@ export default function ProjectDetailPage() {
         </Link>
       </div>
 
-      {/* Hero Header */}
       <div
         style={{
           display: 'flex',
@@ -165,7 +153,7 @@ export default function ProjectDetailPage() {
             <StatusBadge status={project.status} />
           </div>
           <h1 style={{ fontSize: 'clamp(2rem, 4vw, 3rem)', margin: '0 0 10px' }}>
-            {project.title}
+            {projectName(project)}
           </h1>
           <p
             style={{
@@ -179,7 +167,6 @@ export default function ProjectDetailPage() {
           </p>
         </div>
 
-        {/* Action Buttons */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
           <button
             type="button"
@@ -198,7 +185,6 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Quick Status Control Bar */}
       <div
         className="studio-card"
         style={{
@@ -220,10 +206,11 @@ export default function ProjectDetailPage() {
           <select
             value={project.status}
             onChange={(e) => handleStatusChange(e.target.value)}
+            disabled={allowedStatuses.length <= 1}
             className="studio-select"
             style={{ width: 'auto', minWidth: '180px', padding: '6px 12px' }}
           >
-            {PROJECT_STATUSES.map((status) => (
+            {allowedStatuses.map((status) => (
               <option key={status} value={status}>
                 {status}
               </option>
@@ -232,7 +219,6 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Meta Grid */}
       <div
         style={{
           display: 'grid',
@@ -240,7 +226,6 @@ export default function ProjectDetailPage() {
           gap: '24px',
         }}
       >
-        {/* Client Association */}
         <div className="studio-card" style={{ padding: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
             <User size={16} color="#71717a" />
@@ -277,7 +262,6 @@ export default function ProjectDetailPage() {
           )}
         </div>
 
-        {/* Associated Metadata Details */}
         <div className="studio-card" style={{ padding: '24px' }}>
           <span className="editorial-tag">TIMESTAMP REGISTRY</span>
           <h3 style={{ fontSize: '15px', margin: '4px 0 16px' }}>Audit Trail</h3>
@@ -288,22 +272,21 @@ export default function ProjectDetailPage() {
               <span className="font-mono" style={{ color: '#f4f4f5' }}>#{project.id}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px' }}>
-              <span style={{ color: '#71717a' }}>Created At</span>
+              <span style={{ color: '#71717a' }}>Shoot Date</span>
               <span className="font-mono" style={{ color: '#f4f4f5' }}>
-                {project.createdAt ? new Date(project.createdAt).toLocaleString() : '—'}
+                {project.shootDate ? new Date(project.shootDate).toLocaleDateString() : '—'}
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#71717a' }}>Updated At</span>
+              <span style={{ color: '#71717a' }}>Created At</span>
               <span className="font-mono" style={{ color: '#f4f4f5' }}>
-                {project.updatedAt ? new Date(project.updatedAt).toLocaleString() : '—'}
+                {project.createdAt ? new Date(project.createdAt).toLocaleString() : '—'}
               </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Edit Modal */}
       <Modal
         isOpen={isEditOpen}
         onClose={() => setIsEditOpen(false)}
@@ -312,45 +295,24 @@ export default function ProjectDetailPage() {
       >
         <form onSubmit={handleEditSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div>
-            <label className="studio-label">Project Title *</label>
+            <label className="studio-label">Project Name *</label>
             <input
               type="text"
               required
-              value={editForm.title}
-              onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+              value={editForm.name}
+              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
               className="studio-input"
             />
           </div>
 
           <div>
-            <label className="studio-label">Linked Client</label>
-            <select
-              value={editForm.clientId}
-              onChange={(e) => setEditForm({ ...editForm, clientId: e.target.value })}
-              className="studio-select"
-            >
-              <option value="">-- No Client Assigned --</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.email || 'No email'})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="studio-label">Status</label>
-            <select
-              value={editForm.status}
-              onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-              className="studio-select"
-            >
-              {PROJECT_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
+            <label className="studio-label">Shoot Date</label>
+            <input
+              type="date"
+              value={editForm.shootDate}
+              onChange={(e) => setEditForm({ ...editForm, shootDate: e.target.value })}
+              className="studio-input"
+            />
           </div>
 
           <div>
@@ -390,13 +352,12 @@ export default function ProjectDetailPage() {
         </form>
       </Modal>
 
-      {/* Delete Confirmation */}
       <ConfirmModal
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
         onConfirm={handleDelete}
         title={`Delete Project #${project.id}`}
-        message={`Are you certain you want to permanently erase "${project.title}" from the registry?`}
+        message={`Are you certain you want to permanently erase "${projectName(project)}" from the registry?`}
         confirmText="Confirm Delete"
         loading={deleteLoading}
       />

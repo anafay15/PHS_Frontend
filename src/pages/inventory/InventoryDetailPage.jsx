@@ -56,8 +56,7 @@ export default function InventoryDetailPage() {
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignForm, setAssignForm] = useState({
     projectId: '',
-    bookingId: '',
-    assignedTo: '',
+    quantity: '1',
     notes: '',
   });
 
@@ -65,10 +64,9 @@ export default function InventoryDetailPage() {
   const [isMaintOpen, setIsMaintOpen] = useState(false);
   const [maintLoading, setMaintLoading] = useState(false);
   const [maintForm, setMaintForm] = useState({
-    issue: '',
+    description: '',
     cost: '',
-    serviceDate: '',
-    resolvedDate: '',
+    date: '',
     status: 'IN_PROGRESS',
     notes: '',
   });
@@ -144,13 +142,20 @@ export default function InventoryDetailPage() {
     e.preventDefault();
     try {
       setAssignLoading(true);
-      const payload = { ...assignForm };
-      if (payload.projectId) payload.projectId = Number(payload.projectId);
-      if (payload.bookingId) payload.bookingId = Number(payload.bookingId);
+      const projectId = Number(assignForm.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        toast.error('A project is required for an equipment assignment.');
+        return;
+      }
+      const payload = {
+        projectId,
+        quantity: Number(assignForm.quantity) || 1,
+        notes: assignForm.notes || undefined,
+      };
       await assignmentsApi.assignEquipment(id, payload);
       toast.success('Equipment assigned to deployment.');
       setIsAssignOpen(false);
-      setAssignForm({ projectId: '', bookingId: '', assignedTo: '', notes: '' });
+      setAssignForm({ projectId: '', quantity: '1', notes: '' });
       fetchAllData();
     } catch (err) {
       console.error('Assignment failed', err);
@@ -173,18 +178,23 @@ export default function InventoryDetailPage() {
 
   const handleMaintSubmit = async (e) => {
     e.preventDefault();
-    if (!maintForm.issue) {
-      toast.error('Issue description is required.');
+    if (!maintForm.description.trim()) {
+      toast.error('Maintenance description is required.');
       return;
     }
     try {
       setMaintLoading(true);
-      const payload = { ...maintForm };
-      if (payload.cost) payload.cost = Number(payload.cost);
+      const payload = {
+        description: maintForm.description.trim(),
+        cost: maintForm.cost ? Number(maintForm.cost) : undefined,
+        date: maintForm.date || undefined,
+        status: maintForm.status,
+        notes: maintForm.notes || undefined,
+      };
       await maintenanceApi.createMaintenanceRecord(id, payload);
       toast.success('Maintenance ticket logged.');
       setIsMaintOpen(false);
-      setMaintForm({ issue: '', cost: '', serviceDate: '', resolvedDate: '', status: 'IN_PROGRESS', notes: '' });
+      setMaintForm({ description: '', cost: '', date: '', status: 'IN_PROGRESS', notes: '' });
       fetchAllData();
     } catch (err) {
       console.error('Failed to log maintenance', err);
@@ -422,13 +432,13 @@ export default function InventoryDetailPage() {
                       #{a.id}
                     </td>
                     <td style={{ fontWeight: 500, color: '#ffffff' }}>
-                      {a.assignedTo || 'Lead Cinematographer'}
+                      {a.project?.name || (a.projectId ? `Project #${a.projectId}` : '—')}
                     </td>
                     <td style={{ color: '#a1a1aa' }}>
-                      {a.project?.title || (a.projectId ? `Project #${a.projectId}` : '—')}
+                      {a.project?.name || (a.projectId ? `Project #${a.projectId}` : '—')}
                     </td>
                     <td className="font-mono" style={{ fontSize: '11px', color: '#71717a' }}>
-                      {a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '—'}
+                      {a.assignedAt ? new Date(a.assignedAt).toLocaleDateString() : '—'}
                     </td>
                     <td>
                       {a.returnedAt ? (
@@ -512,7 +522,7 @@ export default function InventoryDetailPage() {
                       #{m.id}
                     </td>
                     <td>
-                      <div style={{ fontWeight: 500, color: '#ffffff' }}>{m.issue}</div>
+                      <div style={{ fontWeight: 500, color: '#ffffff' }}>{m.description}</div>
                       {m.notes && (
                         <div style={{ color: '#71717a', fontSize: '12px' }}>{m.notes}</div>
                       )}
@@ -521,7 +531,7 @@ export default function InventoryDetailPage() {
                       {m.cost ? `$${Number(m.cost).toLocaleString()}` : '—'}
                     </td>
                     <td className="font-mono" style={{ fontSize: '11px', color: '#71717a' }}>
-                      {m.serviceDate ? new Date(m.serviceDate).toLocaleDateString() : '—'}
+                      {m.date ? new Date(m.date).toLocaleDateString() : '—'}
                     </td>
                     <td>
                       <StatusBadge status={m.status || 'IN_PROGRESS'} />
@@ -688,18 +698,19 @@ export default function InventoryDetailPage() {
       >
         <form onSubmit={handleAssignSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div>
-            <label className="studio-label">Operator Name / Role</label>
+            <label className="studio-label">Quantity *</label>
             <input
-              type="text"
-              placeholder="e.g. Marcus Cole (1st AC)"
-              value={assignForm.assignedTo}
-              onChange={(e) => setAssignForm({ ...assignForm, assignedTo: e.target.value })}
+              type="number"
+              min="1"
+              required
+              value={assignForm.quantity}
+              onChange={(e) => setAssignForm({ ...assignForm, quantity: e.target.value })}
               className="studio-input"
             />
           </div>
 
           <div>
-            <label className="studio-label">Deploy To Project</label>
+            <label className="studio-label">Deploy To Project *</label>
             <select
               value={assignForm.projectId}
               onChange={(e) => setAssignForm({ ...assignForm, projectId: e.target.value })}
@@ -708,23 +719,7 @@ export default function InventoryDetailPage() {
               <option value="">-- No Project Linked --</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.title} (#{p.id})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="studio-label">Deploy To Booking / Shoot</label>
-            <select
-              value={assignForm.bookingId}
-              onChange={(e) => setAssignForm({ ...assignForm, bookingId: e.target.value })}
-              className="studio-select"
-            >
-              <option value="">-- No Specific Booking --</option>
-              {bookings.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.date ? new Date(b.date).toLocaleDateString() : 'Date TBD'} // {b.location || 'Studio'} (#{b.id})
+                  {p.name} (#{p.id})
                 </option>
               ))}
             </select>
@@ -782,8 +777,8 @@ export default function InventoryDetailPage() {
               type="text"
               required
               placeholder="e.g. Sensor cleaning, lens calibration, mount repair"
-              value={maintForm.issue}
-              onChange={(e) => setMaintForm({ ...maintForm, issue: e.target.value })}
+              value={maintForm.description}
+              onChange={(e) => setMaintForm({ ...maintForm, description: e.target.value })}
               className="studio-input"
             />
           </div>
@@ -809,7 +804,7 @@ export default function InventoryDetailPage() {
               >
                 <option value="IN_PROGRESS">IN_PROGRESS</option>
                 <option value="COMPLETED">COMPLETED</option>
-                <option value="PENDING_PARTS">PENDING_PARTS</option>
+                <option value="PENDING">PENDING</option>
               </select>
             </div>
           </div>
@@ -819,20 +814,12 @@ export default function InventoryDetailPage() {
               <label className="studio-label">Service Date</label>
               <input
                 type="date"
-                value={maintForm.serviceDate}
-                onChange={(e) => setMaintForm({ ...maintForm, serviceDate: e.target.value })}
+                value={maintForm.date}
+                onChange={(e) => setMaintForm({ ...maintForm, date: e.target.value })}
                 className="studio-input"
               />
             </div>
-            <div>
-              <label className="studio-label">Resolved Date</label>
-              <input
-                type="date"
-                value={maintForm.resolvedDate}
-                onChange={(e) => setMaintForm({ ...maintForm, resolvedDate: e.target.value })}
-                className="studio-input"
-              />
-            </div>
+            
           </div>
 
           <div>

@@ -1,5 +1,7 @@
 import api from './axios';
 
+export const MAINTENANCE_STATUSES = ['COMPLETED', 'IN_PROGRESS', 'PENDING'];
+
 export const maintenanceApi = {
   getMaintenanceRecords: async (inventoryId) => {
     const response = await api.get(`/api/maintenance/inventory/${inventoryId}`);

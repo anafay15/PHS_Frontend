@@ -7,6 +7,7 @@ import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import ScrollReveal from '../../components/layout/ScrollReveal';
+import { getApiErrorMessage, formatCurrency, projectName, unwrapList } from '../../utils/api';
 import {
   FolderKanban,
   Calendar,
@@ -30,8 +31,7 @@ export default function DashboardPage() {
       const data = await dashboardApi.getSummary();
       setSummary(data);
     } catch (err) {
-      console.error('Failed to load dashboard summary', err);
-      const msg = err.response?.data?.message || 'Unable to synchronize dashboard telemetry from backend.';
+      const msg = getApiErrorMessage(err, 'Unable to load dashboard summary.');
       setError(msg);
       toast.error(msg);
     } finally {
@@ -47,25 +47,13 @@ export default function DashboardPage() {
     return <LoadingSpinner text="AGGREGATING STUDIO TELEMETRY // DASHBOARD..." />;
   }
 
-  // Format currency
-  const formatCurrency = (val) => {
-    const num = Number(val || 0);
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      maximumFractionDigits: 0,
-    }).format(num);
-  };
-
-  // Safe extractions from backend response
-  const stats = summary?.stats || summary?.overview || {};
-  const recentProjects = summary?.recentProjects || [];
-  const upcomingBookings = summary?.upcomingBookings || [];
-  const recentPayments = summary?.recentPayments || [];
+  const overview = summary?.overview || {};
+  const recentProjects = unwrapList(summary?.recentProjects);
+  const upcomingBookings = unwrapList(summary?.upcomingBookings);
+  const recentPayments = unwrapList(summary?.recentPayments);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      {/* Editorial Header */}
       <div
         style={{
           display: 'flex',
@@ -92,7 +80,6 @@ export default function DashboardPage() {
           </h1>
         </div>
 
-        {/* Quick Execution Actions */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
           <Link to="/projects" className="studio-btn studio-btn-primary">
             <Plus size={14} /> New Project
@@ -106,7 +93,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Backend Connectivity Alert banner if error occurred */}
       {error && (
         <div
           style={{
@@ -133,7 +119,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Primary KPI Grid (GSAP ScrollTrigger Reveal) */}
       <ScrollReveal>
         <div
           style={{
@@ -145,35 +130,34 @@ export default function DashboardPage() {
           <StatCard
             tag="METRIC // 01"
             label="Total Gross Invoiced"
-            value={formatCurrency(stats.totalRevenue || stats.revenue)}
-            subtitle="Calculated across all logged payment records"
+            value={formatCurrency(overview.totalRevenue)}
+            subtitle="Paid payment records in the ledger"
             icon={TrendingUp}
           />
           <StatCard
             tag="METRIC // 02"
             label="Active Production Projects"
-            value={stats.activeProjects ?? stats.projectsCount ?? 0}
-            subtitle="Engaged in shooting, editing, or client review"
+            value={overview.activeProjects ?? 0}
+            subtitle={`${overview.completedProjects ?? 0} completed // ${overview.totalClients ?? 0} clients`}
             icon={FolderKanban}
           />
           <StatCard
             tag="METRIC // 03"
             label="Upcoming Scheduled Shoots"
-            value={stats.upcomingShootsCount ?? upcomingBookings.length ?? 0}
-            subtitle="Confirmed bookings on current calendar"
+            value={upcomingBookings.length}
+            subtitle="Scheduled bookings from today forward"
             icon={Calendar}
           />
           <StatCard
             tag="METRIC // 04"
             label="Pending Settlement Balance"
-            value={formatCurrency(stats.pendingPaymentsTotal || stats.pendingPayments)}
-            subtitle="Unsettled or pending invoice deposits"
+            value={formatCurrency(overview.pendingRevenue)}
+            subtitle={`${overview.totalPayments ?? 0} payment records total`}
             icon={CreditCard}
           />
         </div>
       </ScrollReveal>
 
-      {/* Secondary Layout: Recent Projects & Upcoming Bookings */}
       <div
         style={{
           display: 'grid',
@@ -181,7 +165,6 @@ export default function DashboardPage() {
           gap: '24px',
         }}
       >
-        {/* Recent Projects Section */}
         <div className="studio-card" style={{ padding: '24px' }}>
           <div
             style={{
@@ -238,11 +221,11 @@ export default function DashboardPage() {
                           to={`/projects/${project.id}`}
                           style={{ color: '#ffffff', textDecoration: 'none' }}
                         >
-                          {project.title || `Project #${project.id}`}
+                          {projectName(project)}
                         </Link>
                       </td>
                       <td style={{ color: '#a1a1aa' }}>
-                        {project.client?.name || project.clientName || '—'}
+                        {project.client?.name || '—'}
                       </td>
                       <td>
                         <StatusBadge status={project.status} />
@@ -264,7 +247,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Upcoming Bookings Section */}
         <div className="studio-card" style={{ padding: '24px' }}>
           <div
             style={{
@@ -318,7 +300,7 @@ export default function DashboardPage() {
                 >
                   <div>
                     <div style={{ fontWeight: 500, color: '#f4f4f5', fontSize: '14px' }}>
-                      {booking.project?.title || booking.location || `Booking #${booking.id}`}
+                      {projectName(booking.project, booking.location || `Booking #${booking.id}`)}
                     </div>
                     <div
                       style={{
@@ -332,7 +314,7 @@ export default function DashboardPage() {
                       {booking.startTime && `// ${booking.startTime}`}
                     </div>
                   </div>
-                  <StatusBadge status={booking.status || 'BOOKED'} />
+                  <StatusBadge status={booking.status || 'SCHEDULED'} />
                 </div>
               ))}
             </div>
@@ -340,7 +322,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent Payments Section */}
       <div className="studio-card" style={{ padding: '24px' }}>
         <div
           style={{
@@ -406,7 +387,9 @@ export default function DashboardPage() {
                       <StatusBadge status={pay.status} />
                     </td>
                     <td className="font-mono" style={{ fontSize: '11px', color: '#71717a' }}>
-                      {pay.paidAt || pay.createdAt ? new Date(pay.paidAt || pay.createdAt).toLocaleDateString() : '—'}
+                      {pay.paidAt || pay.createdAt
+                        ? new Date(pay.paidAt || pay.createdAt).toLocaleDateString()
+                        : '—'}
                     </td>
                   </tr>
                 ))}

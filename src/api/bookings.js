@@ -1,5 +1,7 @@
 import api from './axios';
 
+export const BOOKING_STATUSES = ['SCHEDULED', 'COMPLETED', 'CANCELLED'];
+
 export const bookingsApi = {
   getBookings: async (params) => {
     const response = await api.get('/api/bookings', { params });

@@ -13,6 +13,25 @@ export const PROJECT_STATUSES = [
   'COMPLETED',
 ];
 
+export const PROJECT_STATUS_TRANSITIONS = {
+  LEAD: ['QUOTED'],
+  QUOTED: ['BOOKED', 'LEAD'],
+  BOOKED: ['SHOOTING', 'QUOTED'],
+  SHOOTING: ['EDITING'],
+  EDITING: ['CLIENT_REVIEW'],
+  CLIENT_REVIEW: ['CHANGES_REQUESTED', 'APPROVED'],
+  CHANGES_REQUESTED: ['CLIENT_REVIEW'],
+  APPROVED: ['DELIVERED'],
+  DELIVERED: ['COMPLETED'],
+  COMPLETED: [],
+};
+
+export function getAllowedProjectStatuses(currentStatus) {
+  const current = currentStatus || 'LEAD';
+  const next = PROJECT_STATUS_TRANSITIONS[current] || [];
+  return [current, ...next.filter((status) => status !== current)];
+}
+
 export const projectsApi = {
   getProjects: async (params) => {
     const response = await api.get('/api/projects', { params });

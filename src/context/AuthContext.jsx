@@ -1,72 +1,85 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authApi } from '../api/auth';
+import { getStoredToken } from '../api/axios';
 
 const AuthContext = createContext(null);
 
-const DEFAULT_OPERATOR = {
-  name: 'Studio Director',
-  email: 'director@studio.internal',
-  role: 'LEAD OPERATOR',
-};
+function readStoredUser() {
+  try {
+    const storedUser = localStorage.getItem('studio_user');
+    return storedUser ? JSON.parse(storedUser) : null;
+  } catch {
+    return null;
+  }
+}
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(DEFAULT_OPERATOR);
-  const [token, setToken] = useState(() => localStorage.getItem('studio_token') || 'active_operator_session');
+  const [user, setUser] = useState(() => readStoredUser());
+  const [token, setToken] = useState(() => getStoredToken());
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    try {
-      const storedToken = localStorage.getItem('studio_token') || localStorage.getItem('token');
-      const storedUser = localStorage.getItem('studio_user');
+    setToken(getStoredToken());
+    setUser(readStoredUser());
+  }, []);
 
-      if (storedToken) {
-        setToken(storedToken);
+  const persistSession = (authToken, authUser) => {
+    setToken(authToken);
+    setUser(authUser);
+    if (authToken) {
+      localStorage.setItem('studio_token', authToken);
+    } else {
+      localStorage.removeItem('studio_token');
+      localStorage.removeItem('token');
+    }
+    if (authUser) {
+      localStorage.setItem('studio_user', JSON.stringify(authUser));
+    } else {
+      localStorage.removeItem('studio_user');
+    }
+  };
+
+  const login = useCallback(async (email, password) => {
+    setLoading(true);
+    try {
+      const data = await authApi.login({ email, password });
+      const authToken = data?.token;
+      const authUser = data?.user || null;
+      if (!authToken) {
+        throw new Error('Login did not return a token');
       }
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
-      }
-    } catch (e) {
-      console.error('Failed to parse cached operator profile', e);
+      persistSession(authToken, authUser);
+      return data;
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  const login = useCallback(async (email, password) => {
-    const data = await authApi.login({ email, password });
-    const authToken = data?.token || data?.data?.token || 'active_operator_session';
-    const authUser = data?.user || data?.data?.user || { name: 'Studio Director', email };
-
-    setToken(authToken);
-    setUser(authUser);
-    localStorage.setItem('studio_token', authToken);
-    localStorage.setItem('studio_user', JSON.stringify(authUser));
-    return data;
-  }, []);
-
   const register = useCallback(async (name, email, password) => {
-    const data = await authApi.register({ name, email, password });
-    const authToken = data?.token || data?.data?.token || 'active_operator_session';
-    const authUser = data?.user || data?.data?.user || { name, email };
-
-    setToken(authToken);
-    setUser(authUser);
-    localStorage.setItem('studio_token', authToken);
-    localStorage.setItem('studio_user', JSON.stringify(authUser));
-    return data;
+    setLoading(true);
+    try {
+      const data = await authApi.register({ name, email, password });
+      const authToken = data?.token;
+      const authUser = data?.user || null;
+      if (!authToken) {
+        throw new Error('Registration did not return a token');
+      }
+      persistSession(authToken, authUser);
+      return data;
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const logout = useCallback(() => {
-    // Reset to default studio director identity
-    setUser(DEFAULT_OPERATOR);
-    localStorage.removeItem('studio_token');
-    localStorage.removeItem('token');
-    localStorage.removeItem('studio_user');
+    persistSession(null, null);
   }, []);
 
   const value = {
     user,
     token,
     loading,
-    isAuthenticated: true,
+    isAuthenticated: Boolean(token),
     login,
     register,
     logout,

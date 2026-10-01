@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
-import { quotesApi } from '../../api/quotes';
+import { quotesApi, QUOTE_STATUSES } from '../../api/quotes';
 import { projectsApi } from '../../api/projects';
 import { useToast } from '../../context/ToastContext';
+import {
+  getApiErrorMessage,
+  unwrapList,
+  toIntId,
+  toDateInputValue,
+  formatCurrency,
+  projectName,
+} from '../../utils/api';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import Modal from '../../components/ui/Modal';
@@ -31,7 +39,7 @@ export default function QuotesPage() {
     validUntil: '',
     status: 'DRAFT',
     projectId: '',
-    notes: '',
+    description: '',
   });
 
   // Edit Modal
@@ -44,7 +52,7 @@ export default function QuotesPage() {
     validUntil: '',
     status: 'DRAFT',
     projectId: '',
-    notes: '',
+    description: '',
   });
 
   // Delete State
@@ -60,11 +68,10 @@ export default function QuotesPage() {
         quotesApi.getQuotes(),
         projectsApi.getProjects().catch(() => []),
       ]);
-      setQuotes(Array.isArray(qData) ? qData : qData?.quotes || []);
-      setProjects(Array.isArray(pData) ? pData : pData?.projects || []);
+      setQuotes(unwrapList(qData, 'quotes'));
+      setProjects(unwrapList(pData, 'projects'));
     } catch (err) {
-      console.error('Failed to load quotes', err);
-      toast.error(err.response?.data?.message || 'Error querying quotes ledger.');
+      toast.error(getApiErrorMessage(err, 'Error querying quotes ledger.'));
     } finally {
       setLoading(false);
     }
@@ -76,25 +83,25 @@ export default function QuotesPage() {
 
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.title || !formData.amount) {
-      toast.error('Title and Amount are required.');
+    const projectId = toIntId(formData.projectId);
+    if (!formData.title || !formData.amount || !projectId) {
+      toast.error('Title, amount and project are required.');
       return;
     }
 
     try {
       setCreateLoading(true);
-      const payload = {
+      const created = await quotesApi.createQuote({
+        projectId,
         title: formData.title,
+        description: formData.description || undefined,
         amount: Number(formData.amount),
         discount: formData.discount ? Number(formData.discount) : 0,
-        status: formData.status || 'DRAFT',
-        notes: formData.notes,
-      };
-      if (formData.validUntil) payload.validUntil = formData.validUntil;
-      if (formData.projectId) {
-        payload.projectId = isNaN(formData.projectId) ? formData.projectId : Number(formData.projectId);
+        validUntil: formData.validUntil || undefined,
+      });
+      if (formData.status && formData.status !== 'DRAFT' && created?.id) {
+        await quotesApi.updateQuote(created.id, { status: formData.status });
       }
-      await quotesApi.createQuote(payload);
       toast.success('Proposal quote drafted.');
       setIsCreateOpen(false);
       setFormData({
@@ -104,12 +111,11 @@ export default function QuotesPage() {
         validUntil: '',
         status: 'DRAFT',
         projectId: '',
-        notes: '',
+        description: '',
       });
       loadData();
     } catch (err) {
-      console.error('Failed to create quote', err);
-      toast.error(err.response?.data?.message || 'Failed to draft quote.');
+      toast.error(getApiErrorMessage(err, 'Failed to draft quote.'));
     } finally {
       setCreateLoading(false);
     }
@@ -122,7 +128,7 @@ export default function QuotesPage() {
       loadData();
     } catch (err) {
       console.error('Failed to accept quote', err);
-      toast.error(err.response?.data?.message || 'Failed to accept quote.');
+      toast.error(getApiErrorMessage(err, 'Failed to accept quote.'));
     }
   };
 
@@ -132,10 +138,10 @@ export default function QuotesPage() {
       title: quote.title || '',
       amount: quote.amount ?? '',
       discount: quote.discount ?? '',
-      validUntil: quote.validUntil ? quote.validUntil.split('T')[0] : '',
+      validUntil: toDateInputValue(quote.validUntil),
       status: quote.status || 'DRAFT',
       projectId: quote.projectId || quote.project?.id || '',
-      notes: quote.notes || '',
+      description: quote.description || '',
     });
   };
 
@@ -144,24 +150,19 @@ export default function QuotesPage() {
     if (!editTarget) return;
     try {
       setEditLoading(true);
-      const payload = {
+      await quotesApi.updateQuote(editTarget.id, {
         title: editForm.title,
+        description: editForm.description,
         amount: Number(editForm.amount),
         discount: editForm.discount ? Number(editForm.discount) : 0,
         status: editForm.status,
-        notes: editForm.notes,
-      };
-      if (editForm.validUntil) payload.validUntil = editForm.validUntil;
-      if (editForm.projectId) {
-        payload.projectId = isNaN(editForm.projectId) ? editForm.projectId : Number(editForm.projectId);
-      }
-      await quotesApi.updateQuote(editTarget.id, payload);
+        validUntil: editForm.validUntil || null,
+      });
       toast.success('Quote revised.');
       setEditTarget(null);
       loadData();
     } catch (err) {
-      console.error('Failed to update quote', err);
-      toast.error(err.response?.data?.message || 'Failed to update quote.');
+      toast.error(getApiErrorMessage(err, 'Failed to update quote.'));
     } finally {
       setEditLoading(false);
     }
@@ -177,17 +178,10 @@ export default function QuotesPage() {
       setQuotes((prev) => prev.filter((q) => q.id !== deleteTarget.id));
     } catch (err) {
       console.error('Failed to delete quote', err);
-      toast.error(err.response?.data?.message || 'Failed to delete quote.');
+      toast.error(getApiErrorMessage(err, 'Failed to delete quote.'));
     } finally {
       setDeleteLoading(false);
     }
-  };
-
-  const formatCurrency = (num) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(Number(num || 0));
   };
 
   return (
@@ -279,7 +273,7 @@ export default function QuotesPage() {
                       {formatCurrency(q.totalAmount ?? (Number(q.amount || 0) - Number(q.discount || 0)))}
                     </td>
                     <td style={{ color: '#a1a1aa', fontSize: '13px' }}>
-                      {q.project?.title || (q.projectId ? `Project #${q.projectId}` : '—')}
+                      {projectName(q.project, q.projectId ? `Project #${q.projectId}` : '—')}
                     </td>
                     <td>
                       <StatusBadge status={q.status || 'DRAFT'} />
@@ -292,7 +286,7 @@ export default function QuotesPage() {
                           gap: '6px',
                         }}
                       >
-                        {q.status !== 'APPROVED' && q.status !== 'ACCEPTED' && (
+                        {q.status === 'SENT' && (
                           <button
                             type="button"
                             onClick={() => handleAccept(q.id)}
@@ -394,25 +388,27 @@ export default function QuotesPage() {
                 onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                 className="studio-select"
               >
-                <option value="DRAFT">DRAFT</option>
-                <option value="SENT">SENT</option>
-                <option value="ACCEPTED">ACCEPTED</option>
-                <option value="REJECTED">REJECTED</option>
+                {QUOTE_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
 
           <div>
-            <label className="studio-label">Assign To Project</label>
+            <label className="studio-label">Assign To Project *</label>
             <select
+              required
               value={formData.projectId}
               onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
               className="studio-select"
             >
-              <option value="">-- No Project Linked --</option>
+              <option value="">-- Select Project --</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.title} (#{p.id})
+                  {projectName(p)} (#{p.id})
                 </option>
               ))}
             </select>
@@ -423,8 +419,8 @@ export default function QuotesPage() {
             <textarea
               rows={3}
               placeholder="50% deposit required upon signing. Net 15 terms on completion."
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               className="studio-textarea"
             />
           </div>
@@ -516,36 +512,31 @@ export default function QuotesPage() {
                 onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
                 className="studio-select"
               >
-                <option value="DRAFT">DRAFT</option>
-                <option value="SENT">SENT</option>
-                <option value="ACCEPTED">ACCEPTED</option>
-                <option value="REJECTED">REJECTED</option>
+                {QUOTE_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
 
           <div>
             <label className="studio-label">Linked Project</label>
-            <select
-              value={editForm.projectId}
-              onChange={(e) => setEditForm({ ...editForm, projectId: e.target.value })}
-              className="studio-select"
-            >
-              <option value="">-- No Project Linked --</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title} (#{p.id})
-                </option>
-              ))}
-            </select>
+            <div className="studio-input" style={{ color: '#a1a1aa' }}>
+              {projectName(
+                projects.find((p) => Number(p.id) === Number(editForm.projectId)),
+                editForm.projectId ? `Project #${editForm.projectId}` : '—'
+              )}
+            </div>
           </div>
 
           <div>
             <label className="studio-label">Terms & Notes</label>
             <textarea
               rows={3}
-              value={editForm.notes}
-              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+              value={editForm.description}
+              onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
               className="studio-textarea"
             />
           </div>

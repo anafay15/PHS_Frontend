@@ -1,5 +1,7 @@
 import api from './axios';
 
+export const DELIVERY_STATUSES = ['PENDING', 'READY', 'DELIVERED'];
+
 export const deliveriesApi = {
   getDeliveries: async (params) => {
     const response = await api.get('/api/deliveries', { params });
