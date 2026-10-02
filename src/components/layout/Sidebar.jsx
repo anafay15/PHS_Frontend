@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   FolderKanban,
@@ -11,8 +11,10 @@ import {
   Settings,
   X,
   Disc,
+  LogOut,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 
 const NAV_ITEMS = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, tag: '01' },
@@ -27,7 +29,15 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar({ mobileOpen, onMobileClose }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const toast = useToast();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    toast.info('Operator session terminated.');
+    navigate('/login');
+  };
 
   return (
     <>
@@ -276,6 +286,42 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
           >
             <span>MODE: DIRECT OPERATOR ACCESS</span>
           </div>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              marginTop: '10px',
+              padding: '7px 10px',
+              background: 'rgba(239, 68, 68, 0.06)',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              borderRadius: '2px',
+              color: '#f87171',
+              fontFamily: 'var(--font-mono, monospace)',
+              fontSize: '11px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.06)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+            }}
+            aria-label="Terminate Operator Session"
+          >
+            <LogOut size={12} />
+            <span>Sign Out // End Session</span>
+          </button>
         </div>
       </aside>
 

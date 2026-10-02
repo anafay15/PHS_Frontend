@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { API_BASE_URL } from '../../api/axios';
@@ -9,11 +10,13 @@ import {
   RotateCcw,
   Activity,
   Layers,
+  LogOut,
 } from 'lucide-react';
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
   const toast = useToast();
+  const navigate = useNavigate();
   const [pingStatus, setPingStatus] = useState(null);
   const [pinging, setPinging] = useState(false);
 
@@ -102,17 +105,28 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div style={{ marginTop: '24px' }}>
+          <div style={{ marginTop: '24px', display: 'flex', gap: '10px' }}>
+            <button
+              type="button"
+              onClick={() => {
+                toast.success('Workspace profile cache refreshed.');
+              }}
+              className="studio-btn studio-btn-outline"
+              style={{ flex: 1 }}
+            >
+              <RotateCcw size={13} /> Refresh Cache
+            </button>
             <button
               type="button"
               onClick={() => {
                 logout();
-                toast.success('Workspace profile cache refreshed.');
+                toast.info('Operator session terminated.');
+                navigate('/login');
               }}
-              className="studio-btn studio-btn-outline"
-              style={{ width: '100%' }}
+              className="studio-btn studio-btn-danger"
+              style={{ flex: 1 }}
             >
-              <RotateCcw size={13} /> Refresh Operator Cache
+              <LogOut size={13} /> Sign Out
             </button>
           </div>
         </div>

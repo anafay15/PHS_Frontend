@@ -6,6 +6,11 @@ const AuthContext = createContext(null);
 
 function readStoredUser() {
   try {
+    const token = getStoredToken();
+    if (!token) {
+      localStorage.removeItem('studio_user');
+      return null;
+    }
     const storedUser = localStorage.getItem('studio_user');
     return storedUser ? JSON.parse(storedUser) : null;
   } catch {
@@ -19,8 +24,13 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    setToken(getStoredToken());
-    setUser(readStoredUser());
+    const currentToken = getStoredToken();
+    setToken(currentToken);
+    if (!currentToken) {
+      setUser(null);
+    } else {
+      setUser(readStoredUser());
+    }
   }, []);
 
   const persistSession = (authToken, authUser) => {
@@ -46,7 +56,7 @@ export const AuthProvider = ({ children }) => {
       const authToken = data?.token;
       const authUser = data?.user || null;
       if (!authToken) {
-        throw new Error('Login did not return a token');
+        throw new Error('Login did not return a valid authentication token');
       }
       persistSession(authToken, authUser);
       return data;
@@ -62,7 +72,7 @@ export const AuthProvider = ({ children }) => {
       const authToken = data?.token;
       const authUser = data?.user || null;
       if (!authToken) {
-        throw new Error('Registration did not return a token');
+        throw new Error('Registration did not return an authentication token');
       }
       persistSession(authToken, authUser);
       return data;

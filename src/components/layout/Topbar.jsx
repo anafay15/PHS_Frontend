@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
-import { Menu, Wifi, Terminal } from 'lucide-react';
+import { useLocation, Link } from 'react-router-dom';
+import { Menu, Wifi, Terminal, User } from 'lucide-react';
 import { API_BASE_URL } from '../../api/axios';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Topbar({ onMenuClick }) {
   const location = useLocation();
+  const { user } = useAuth();
   const [timeStr, setTimeStr] = useState('');
 
   useEffect(() => {
@@ -85,7 +87,7 @@ export default function Topbar({ onMenuClick }) {
       </div>
 
       {/* Right Telemetry Information */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
         {/* API Host Badge */}
         <div
           style={{
@@ -105,6 +107,53 @@ export default function Topbar({ onMenuClick }) {
           <Wifi size={12} color="#22c55e" />
           <span>API: {API_BASE_URL.replace(/^https?:\/\//, '')}</span>
         </div>
+
+        {/* Operator Profile Link */}
+        <Link
+          to="/settings"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            textDecoration: 'none',
+            padding: '4px 10px',
+            background: 'rgba(255, 255, 255, 0.04)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '2px',
+            color: '#f4f4f5',
+            fontFamily: 'var(--font-sans)',
+            fontSize: '12px',
+            transition: 'border-color 0.2s ease',
+          }}
+          className="hidden sm:flex"
+          title="Open Operator Dossier"
+        >
+          <div
+            style={{
+              width: '18px',
+              height: '18px',
+              borderRadius: '50%',
+              backgroundColor: '#27272a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#d4d4d8',
+            }}
+          >
+            <User size={11} />
+          </div>
+          <span
+            style={{
+              fontWeight: 500,
+              maxWidth: '120px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {user?.name || user?.email?.split('@')[0] || 'Operator'}
+          </span>
+        </Link>
 
         {/* Live Studio Clock */}
         <div

@@ -2,8 +2,12 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 
-// Layout
+// Layout & Guards
 import AppLayout from './components/layout/AppLayout';
+import ProtectedRoute from './components/auth/ProtectedRoute';
+
+// Authentication Pages
+import LoginPage from './pages/auth/LoginPage';
 
 // Core Studio Modules
 import DashboardPage from './pages/dashboard/DashboardPage';
@@ -28,8 +32,15 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
           <Routes>
-            {/* Core OS Layout & Modules (Direct Access) */}
-            <Route path="/" element={<AppLayout />}>
+            {/* Core OS Layout & Modules (Protected Clearance) */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="projects" element={<ProjectsPage />} />
@@ -45,9 +56,9 @@ export default function App() {
               <Route path="settings" element={<SettingsPage />} />
             </Route>
 
-            {/* Legacy Auth Redirections */}
-            <Route path="/login" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/register" element={<Navigate to="/dashboard" replace />} />
+            {/* Operator Authentication Gateway */}
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<LoginPage initialMode="register" />} />
 
             {/* 404 Route */}
             <Route path="/404" element={<NotFoundPage />} />
